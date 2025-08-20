@@ -1,6 +1,6 @@
 # Quest Game (Spring WebFlux + R2DBC + JWT)
 
-![Build](https://github.com/COTnik789/quest-game/actions/workflows/maven.yml/badge.svg)
+![Build](https://github.com/COTnik789/QuestGame/actions/workflows/maven.yml/badge.svg?branch=master)
 
 Небольшая текстовая квест‑игра для портфолио. Стек: **Java 17**, **Spring WebFlux**, **R2DBC (MySQL)**, **JWT**, **Thymeleaf**.
 
