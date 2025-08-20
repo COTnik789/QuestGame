@@ -1,0 +1,24 @@
+spring:
+  r2dbc:
+    url: r2dbc:h2:mem:///testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: root
+    password: root
+    initialization:
+      enabled: true
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+
+  sql:
+    init:
+      mode: never
+
+server:
+  error:
+    include-exception: true
+    include-message: always
+
+logging:
+  level:
+    root: DEBUG
+    org.springframework.web: DEBUG
+    reactor.core.publisher.Hooks: DEBUG

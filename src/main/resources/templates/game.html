@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Квест-игра</title>
+  <link rel="stylesheet" th:href="@{/css/style.css}" />
+</head>
+<body th:attr="data-game-id=${gameState.id}">
+<header class="topbar">
+  <div class="brand">Quest Game</div>
+  <div class="spacer"></div>
+  <div class="user">
+    <span class="user__email" th:text="${email}">user@mail.com</span>
+    <form method="post" th:action="@{/api/auth/logout}" class="inline">
+      <button type="submit" class="btn btn--ghost">Выйти</button>
+    </form>
+  </div>
+</header>
+
+<main class="container">
+  <section class="grid">
+    <div class="card">
+      <h2>Состояние</h2>
+      <p id="game-description" class="mono" th:text="${gameState.plotProgress}">Текст сюжета…</p>
+      <div class="stats">
+        <div>Здоровье: <strong id="health-value" th:text="${gameState.health}">100</strong></div>
+        <div>Локация: <strong id="location-value" th:text="${gameState.currentLocation}">лес</strong></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Действия</h2>
+      <div id="actions" class="actions">
+        <button class="btn"
+                th:each="a : ${actions}"
+                th:attr="data-key=${a.key}"
+                th:text="${a.label}">Действие</button>
+      </div>
+      <div id="end-block" class="muted" style="display:none; margin-top:10px;">
+        Игра завершена. Вы можете начать заново.
+        <div style="margin-top:8px;">
+          <button class="btn btn--primary" id="restart-btn">Начать заново</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Инвентарь</h2>
+      <ul id="inventory" class="list">
+        <li class="muted">Инвентарь пуст.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Загадка</h2>
+      <div id="riddle" style="display:none;">
+        <div id="riddle-question" class="mono"></div>
+        <div id="riddle-options" class="actions" style="margin-top:10px;"></div>
+      </div>
+      <div id="no-riddle" class="muted">Сейчас загадки нет.</div>
+    </div>
+
+    <div class="card">
+      <h2>Крафт</h2>
+      <div id="craft-list" class="actions">
+        <span class="muted">Нет доступных рецептов.</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const gameStateId = Number(document.body.dataset.gameId);
+
+  function needAuthRedirect(resp) {
+    if (resp.status === 401 || resp.status === 403 || resp.status === 302) {
+      window.location.href = '/api/auth/login';
+      return true;
+    }
+    return false;
+  }
+
+  function rebuildActions(list) {
+    const box = document.getElementById('actions');
+    box.innerHTML = '';
+    list.forEach(a => {
+      const btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.textContent = a.label;
+      btn.dataset.key = a.key;
+      btn.addEventListener('click', () => sendChoice(a.key));
+      box.appendChild(btn);
+    });
+  }
+
+  function showTerminal() {
+    document.getElementById('actions').innerHTML = '';
+    document.getElementById('end-block').style.display = 'block';
+    document.getElementById('restart-btn').onclick = restartGame;
+  }
+
+  function renderRiddle(riddle) {
+    const block = document.getElementById('riddle');
+    const none = document.getElementById('no-riddle');
+    const q = document.getElementById('riddle-question');
+    const opts = document.getElementById('riddle-options');
+
+    if (!riddle) {
+      block.style.display = 'none';
+      none.style.display = 'block';
+      opts.innerHTML = '';
+      return;
+    }
+
+    q.textContent = riddle.question;
+    opts.innerHTML = '';
+    riddle.options.forEach(opt => {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = opt;
+      b.addEventListener('click', () => answerRiddle(opt));
+      opts.appendChild(b);
+    });
+    none.style.display = 'none';
+    block.style.display = 'block';
+  }
+
+  function renderCrafts(crafts) {
+    const box = document.getElementById('craft-list');
+    box.innerHTML = '';
+    if (!crafts || crafts.length === 0) {
+      box.innerHTML = '<span class="muted">Нет доступных рецептов.</span>';
+      return;
+    }
+    crafts.forEach(c => {
+      const wrap = document.createElement('div');
+      wrap.className = 'craft-row';
+      const text = document.createElement('span');
+      text.textContent = `${c.title} (нужно: ${c.requires.join(', ')}) → ${c.result.name}`;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn--ghost';
+      btn.textContent = 'Скрафтить';
+      btn.onclick = () => craft(c.key);
+      wrap.appendChild(text);
+      wrap.appendChild(btn);
+      box.appendChild(wrap);
+    });
+  }
+
+  function updateUIFromState(data) {
+    document.getElementById('game-description').innerText = data.plotProgress;
+    document.getElementById('health-value').innerText = data.health;
+    document.getElementById('location-value').innerText = data.currentLocation;
+
+    if (data.terminal) {
+      showTerminal();
+    } else {
+      document.getElementById('end-block').style.display = 'none';
+      if (Array.isArray(data.actions)) rebuildActions(data.actions);
+    }
+
+    // загадка
+    renderRiddle(data.riddle);
+
+    // крафт (может прийти сразу в ответе)
+    if (Array.isArray(data.crafts)) {
+      renderCrafts(data.crafts);
+    } else {
+      loadCrafts();
+    }
+  }
+
+  function loadInventory() {
+    fetch(`/api/games/${gameStateId}/inventory`, { credentials: 'include' })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(items => {
+              const ul = document.getElementById('inventory');
+              ul.innerHTML = '';
+              if (!items.length) { ul.innerHTML = '<li class="muted">Инвентарь пуст.</li>'; return; }
+              items.forEach(it => {
+                const li = document.createElement('li');
+                const name = (it.name || '').toLowerCase();
+                li.textContent = `${it.name}: ${it.description || ''} `;
+                if (name === 'зелье') {
+                  const useBtn = document.createElement('button');
+                  useBtn.className = 'btn btn--ghost';
+                  useBtn.textContent = 'Использовать';
+                  useBtn.addEventListener('click', () => useItem(it.id));
+                  li.appendChild(useBtn);
+                }
+                ul.appendChild(li);
+              });
+            })
+            .catch(() => {});
+  }
+
+  function loadCrafts() {
+    fetch(`/api/games/${gameStateId}/craft/available`, { credentials: 'include' })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => renderCrafts(data))
+            .catch(() => {});
+  }
+
+  function useItem(itemId) {
+    fetch(`/api/games/${gameStateId}/inventory/use?itemId=${itemId}`, {
+      method: 'POST', credentials: 'include'
+    })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => { updateUIFromState(data); loadInventory(); loadCrafts(); })
+            .catch(() => alert('Не удалось использовать предмет.'));
+  }
+
+  function sendChoice(choiceKey) {
+    const url = `/api/games/progress?gameStateId=${gameStateId}&choice=${encodeURIComponent(choiceKey)}`;
+    fetch(url, { method: 'POST', credentials: 'include' })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => { updateUIFromState(data); loadInventory(); loadCrafts(); })
+            .catch(() => alert('Ошибка запроса. Проверьте аутентификацию.'));
+  }
+
+  function answerRiddle(answer) {
+    const url = `/api/games/riddle/answer?gameStateId=${gameStateId}&answer=${encodeURIComponent(answer)}`;
+    fetch(url, { method: 'POST', credentials: 'include' })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => { updateUIFromState(data); loadInventory(); loadCrafts(); })
+            .catch(() => alert('Не удалось ответить на загадку.'));
+  }
+
+  function craft(recipeKey) {
+    fetch(`/api/games/${gameStateId}/craft?recipeKey=${encodeURIComponent(recipeKey)}`, {
+      method: 'POST', credentials: 'include'
+    })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => { updateUIFromState(data); loadInventory(); loadCrafts(); })
+            .catch(() => alert('Не удалось скрафтить.'));
+  }
+
+  function restartGame() {
+    fetch('/api/games/restart?gameStateId=' + gameStateId, {
+      method: 'POST', credentials: 'include'
+    })
+            .then(r => { if (needAuthRedirect(r)) return Promise.reject(); return r.ok ? r.json() : Promise.reject(r); })
+            .then(data => { updateUIFromState(data); loadInventory(); loadCrafts(); })
+            .catch(() => alert('Не удалось перезапустить игру.'));
+  }
+
+  // стартовые серверные кнопки
+  document.querySelectorAll('#actions .btn').forEach(btn => {
+    const key = btn.getAttribute('data-key');
+    btn.addEventListener('click', () => sendChoice(key));
+  });
+
+  // первичная загрузка
+  loadInventory();
+  loadCrafts();
+</script>
+</body>
+</html>

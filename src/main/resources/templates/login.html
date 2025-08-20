@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Вход в квест-игру</title>
+  <link rel="stylesheet" th:href="@{/css/style.css}" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Quest Game</div>
+  <nav><a th:href="@{/api/auth/register}" class="link">Регистрация</a></nav>
+</header>
+
+<main class="container">
+  <section class="card card--narrow">
+    <h1>Вход</h1>
+    <form method="post" th:action="@{/api/auth/login}" th:object="${user}" class="form">
+      <label class="field">
+        <span>E-mail</span>
+        <input type="email" th:field="*{email}" placeholder="example@mail.com" required />
+      </label>
+      <label class="field">
+        <span>Пароль</span>
+        <input type="password" th:field="*{password}" placeholder="••••••••" required />
+      </label>
+      <button type="submit" class="btn btn--primary">Войти</button>
+    </form>
+    <p th:if="${error}" th:text="${error}" class="error"></p>
+  </section>
+</main>
+</body>
+</html>
