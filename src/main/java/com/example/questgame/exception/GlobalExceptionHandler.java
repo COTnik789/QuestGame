@@ -1,11 +1,8 @@
-package com.example.questgame.controller;
+package com.example.questgame.exception;
 
 import com.example.questgame.dto.ApiError;
-import com.example.questgame.exception.ErrorCode;
-import com.example.questgame.exception.GameException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -23,9 +20,8 @@ import java.util.Map;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-
     @ExceptionHandler(GameException.class)
-    public Mono<ResponseEntity<ApiError>> handleGame(GameException ex, ServerWebExchange exchange) {
+    public Mono<ApiError> handleGame(GameException ex, ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
         ErrorCode code = ex.getCode() == null ? ErrorCode.INTERNAL_ERROR : ex.getCode();
         HttpStatus status = mapStatus(code);
@@ -38,15 +34,16 @@ public class GlobalExceptionHandler {
                 Map.of()
         );
         if (status.is5xxServerError()) {
-            log.error("GameException @ {} -> {} {}: {}", path, status.value(), code, body.message(), ex);
+            log.error("GameException @ {} -> {} {}: {}", path, status.value(), code, body.getMessage(), ex);
         } else {
-            log.warn("GameException @ {} -> {} {}: {}", path, status.value(), code, body.message());
+            log.warn("GameException @ {} -> {} {}: {}", path, status.value(), code, body.getMessage());
         }
-        return Mono.just(ResponseEntity.status(status).body(body));
+        exchange.getResponse().setStatusCode(status);
+        return Mono.just(body);
     }
 
     @ExceptionHandler(AuthenticationException.class)
-    public Mono<ResponseEntity<ApiError>> handleAuth(AuthenticationException ex, ServerWebExchange exchange) {
+    public Mono<ApiError> handleAuth(AuthenticationException ex, ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
         HttpStatus status = HttpStatus.UNAUTHORIZED;
         ApiError body = ApiError.of(
@@ -57,12 +54,13 @@ public class GlobalExceptionHandler {
                 ex.getMessage() != null ? ex.getMessage() : "Unauthorized",
                 Map.of()
         );
-        log.warn("Auth error @ {} -> 401: {}", path, body.message());
-        return Mono.just(ResponseEntity.status(status).body(body));
+        log.warn("Auth error @ {} -> 401: {}", path, body.getMessage());
+        exchange.getResponse().setStatusCode(status);
+        return Mono.just(body);
     }
 
     @ExceptionHandler(WebExchangeBindException.class)
-    public Mono<ResponseEntity<ApiError>> handleBind(WebExchangeBindException ex, ServerWebExchange exchange) {
+    public Mono<ApiError> handleBind(WebExchangeBindException ex, ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
         HttpStatus status = HttpStatus.BAD_REQUEST;
         ApiError body = ApiError.of(
@@ -74,11 +72,12 @@ public class GlobalExceptionHandler {
                 Map.of("errors", ex.getAllErrors())
         );
         log.warn("Validation error @ {} -> 400", path);
-        return Mono.just(ResponseEntity.status(status).body(body));
+        exchange.getResponse().setStatusCode(status);
+        return Mono.just(body);
     }
 
     @ExceptionHandler(ResponseStatusException.class)
-    public Mono<ResponseEntity<ApiError>> handleRse(ResponseStatusException ex, ServerWebExchange exchange) {
+    public Mono<ApiError> handleRse(ResponseStatusException ex, ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
         HttpStatus status = ex.getStatusCode() instanceof HttpStatus hs ? hs : HttpStatus.INTERNAL_SERVER_ERROR;
         ErrorCode code = switch (status) {
@@ -97,15 +96,16 @@ public class GlobalExceptionHandler {
                 Map.of()
         );
         if (status.is5xxServerError()) {
-            log.error("RSE @ {} -> {} {}: {}", path, status.value(), code, body.message(), ex);
+            log.error("RSE @ {} -> {} {}: {}", path, status.value(), code, body.getMessage(), ex);
         } else {
-            log.warn("RSE @ {} -> {} {}: {}", path, status.value(), code, body.message());
+            log.warn("RSE @ {} -> {} {}: {}", path, status.value(), code, body.getMessage());
         }
-        return Mono.just(ResponseEntity.status(status).body(body));
+        exchange.getResponse().setStatusCode(status);
+        return Mono.just(body);
     }
 
     @ExceptionHandler(Throwable.class)
-    public Mono<ResponseEntity<ApiError>> handleGeneric(Throwable ex, ServerWebExchange exchange) {
+    public Mono<ApiError> handleGeneric(Throwable ex, ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value();
         HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
         ApiError body = ApiError.of(
@@ -117,7 +117,8 @@ public class GlobalExceptionHandler {
                 Map.of()
         );
         log.error("Unhandled error @ {} -> 500: {}", path, ex.toString(), ex);
-        return Mono.just(ResponseEntity.status(status).body(body));
+        exchange.getResponse().setStatusCode(status);
+        return Mono.just(body);
     }
 
     private HttpStatus mapStatus(ErrorCode code) {

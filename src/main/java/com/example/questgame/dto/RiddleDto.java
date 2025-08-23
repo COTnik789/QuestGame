@@ -1,5 +1,21 @@
 package com.example.questgame.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.util.List;
 
-public record RiddleDto(String question, List<String> options) {}
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class RiddleDto {
+    @JsonProperty("question")
+    private String question;
+
+    @JsonProperty("options")
+    private List<String> options;
+}

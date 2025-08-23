@@ -8,7 +8,6 @@ import org.springframework.web.reactive.config.WebFluxConfigurer;
 public class StaticResourceConfig implements WebFluxConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Явное сопоставление /css/** -> classpath:/static/css/
         registry.addResourceHandler("/css/**")
                 .addResourceLocations("classpath:/static/css/")
                 .resourceChain(true);

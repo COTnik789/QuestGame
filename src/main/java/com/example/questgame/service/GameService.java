@@ -11,7 +11,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class GameService {
@@ -91,14 +90,15 @@ public class GameService {
 
     public String labelOf(String actionKey) { return ACTION_LABELS.getOrDefault(actionKey, actionKey); }
 
-    public List<String> getAvailableActionKeys(GameState state) {
+    /** Теперь реактивно: поток доступных ключей действий. */
+    public Flux<String> getAvailableActionKeys(GameState state) {
         String loc = locKey(state.getCurrentLocation());
         return switch (loc) {
-            case LOC_FOREST  -> List.of("go_castle", "search_treasure", "run_away", "go_cave", "go_village");
-            case LOC_CAVE    -> List.of("solve_riddle", "go_village");
-            case LOC_VILLAGE -> List.of("return_artifact", "go_cave", "run_away");
-            case LOC_CASTLE  -> List.of("fight_dragon", "solve_riddle", "run_away");
-            default          -> List.of("run_away");
+            case LOC_FOREST  -> Flux.just("go_castle", "search_treasure", "run_away", "go_cave", "go_village");
+            case LOC_CAVE    -> Flux.just("solve_riddle", "go_village");
+            case LOC_VILLAGE -> Flux.just("return_artifact", "go_cave", "run_away");
+            case LOC_CASTLE  -> Flux.just("fight_dragon", "solve_riddle", "run_away");
+            default          -> Flux.just("run_away");
         };
     }
 
@@ -123,7 +123,11 @@ public class GameService {
         return gameStateRepository.save(state);
     }
 
-    public Flux<GameState> getUserGames(Long userId) { return gameStateRepository.findByUserId(userId); }
+    public Mono<GameState> getUserGames(Long userId) { return gameStateRepository.findByUserId(userId); }
+
+    public Mono<GameState> byId(Long gameStateId) {
+        return findState(gameStateId);
+    }
 
     public Mono<GameState> findState(Long gameStateId) {
         return gameStateRepository.findById(gameStateId)
@@ -132,16 +136,18 @@ public class GameService {
 
     public Flux<InventoryItem> listInventory(Long gameStateId) { return inventoryItemRepository.findByGameStateId(gameStateId); }
 
-    public Mono<List<String>> listInventoryNames(Long gameStateId) {
+    /** Теперь реактивно: имена предметов как Flux<String>, уже в lower-case и без пустых. */
+    public Flux<String> listInventoryNames(Long gameStateId) {
         return listInventory(gameStateId)
                 .map(i -> i.getName() == null ? "" : i.getName())
-                .collectList();
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toLowerCase(Locale.ROOT));
     }
 
     public Mono<Boolean> hasItem(Long gameStateId, String name) {
         return inventoryItemRepository
                 .findFirstByGameStateIdAndNameIgnoreCase(gameStateId, name)
-                .hasElement(); // Mono<Boolean>, никогда не null
+                .hasElement();
     }
 
     public Mono<Void> addItemToInventory(Long gameStateId, String name, String description) {
@@ -195,69 +201,69 @@ public class GameService {
 
                     final String loc = locKey(state.getCurrentLocation());
 
-                    final Set<String> allowed = new java.util.HashSet<>(getAvailableActionKeys(state));
-                    System.out.println("DEBUG updatePlot: stateId=" + state.getId()
-                            + ", loc=" + state.getCurrentLocation()
-                            + ", choiceRaw=" + rawChoice
-                            + ", choiceKey=" + choiceKey
-                            + ", allowed=" + allowed);
+                    return getAvailableActionKeys(state).collectList()
+                            .flatMap(keys -> {
+                                final Set<String> allowed = new java.util.HashSet<>(keys);
+                                System.out.println("DEBUG updatePlot: stateId=" + state.getId()
+                                        + ", loc=" + state.getCurrentLocation()
+                                        + ", choiceRaw=" + rawChoice
+                                        + ", choiceKey=" + choiceKey
+                                        + ", allowed=" + allowed);
 
-                    if (!allowed.contains(choiceKey)) {
-                        state.setPlotProgress("Действие недоступно здесь. Выберите один из предложенных вариантов.");
-                        return gameStateRepository.save(state);
-                    }
-
-                    return listInventoryNames(state.getId())
-                            .defaultIfEmpty(List.of())
-                            .map(items -> (items == null ? List.<String>of() : items))
-                            .flatMap(items -> {
-                                boolean hasSword = items.contains("меч");
-                                boolean hasArtifact = items.contains("артефакт");
-                                boolean hasLightBlade = items.contains("клинок света");
-
-                                Event e = decide(loc, choiceKey, hasSword, hasArtifact, hasLightBlade);
-
-                                int newHealth = clamp((state.getHealth()) + e.deltaHealth(), MIN_HEALTH, MAX_HEALTH);
-                                state.setHealth(newHealth);
-                                state.setPlotProgress(e.message());
-                                if (e.newLocation() != null) {
-                                    state.setCurrentLocation(humanLocationName(e.newLocation()));
-                                }
-                                if (newHealth <= 0 && (e.message() == null || !e.message().toLowerCase(Locale.ROOT).contains("игра окончена"))) {
-                                    state.setPlotProgress((e.message() == null ? "" : e.message()) + " Вы умерли. Игра окончена.");
+                                if (!allowed.contains(choiceKey)) {
+                                    state.setPlotProgress("Действие недоступно здесь. Выберите один из предложенных вариантов.");
+                                    return gameStateRepository.save(state);
                                 }
 
-                                Mono<Void> ops = Mono.empty();
+                                return listInventoryNames(state.getId())
+                                        .collectList()
+                                        .defaultIfEmpty(List.of())
+                                        .flatMap(items -> {
+                                            boolean hasSword = items.contains("меч");
+                                            boolean hasArtifact = items.contains("артефакт");
+                                            boolean hasLightBlade = items.contains("клинок света");
 
-                                if (e.itemToGrant() != null) {
-                                    var it = e.itemToGrant();
-                                    String name = it.name() == null ? "" : it.name();
-                                    String desc = it.description() == null ? "" : it.description();
-                                    if (!name.isBlank()) {
-                                        ops = ops.then(grantItemIfAbsent(state.getId(), name, desc));
-                                    }
-                                }
-                                if (e.removeArtifact()) {
-                                    ops = ops.then(removeOneItemByName(state.getId(), "артефакт").onErrorResume(__ -> Mono.empty()));
-                                }
-                                if (e.grantSwordIfMissing()) {
-                                    ops = ops.then(grantItemIfAbsent(state.getId(), "меч", "Острый меч для боя"));
-                                }
+                                            Event e = decide(loc, choiceKey, hasSword, hasArtifact, hasLightBlade);
 
-                                System.out.println("DEBUG updatePlot: applying event for stateId=" + state.getId()
-                                        + " -> health=" + newHealth
-                                        + ", newLoc=" + state.getCurrentLocation()
-                                        + ", msg=" + state.getPlotProgress());
+                                            int newHealth = clamp((state.getHealth()) + e.deltaHealth(), MIN_HEALTH, MAX_HEALTH);
+                                            state.setHealth(newHealth);
+                                            state.setPlotProgress(e.message());
+                                            if (e.newLocation() != null) {
+                                                state.setCurrentLocation(humanLocationName(e.newLocation()));
+                                            }
+                                            if (newHealth <= 0 && (e.message() == null || !e.message().toLowerCase(Locale.ROOT).contains("игра окончена"))) {
+                                                state.setPlotProgress((e.message() == null ? "" : e.message()) + " Вы умерли. Игра окончена.");
+                                            }
 
-                                return ops.then(gameStateRepository.save(state));
-                            })
-                            .doOnError(err -> System.out.println("DEBUG updatePlot ERROR: " + err));
+                                            Mono<Void> ops = Mono.empty();
+
+                                            if (e.itemToGrant() != null) {
+                                                var it = e.itemToGrant();
+                                                String name = it.name() == null ? "" : it.name();
+                                                String desc = it.description() == null ? "" : it.description();
+                                                if (!name.isBlank()) {
+                                                    ops = ops.then(grantItemIfAbsent(state.getId(), name, desc));
+                                                }
+                                            }
+                                            if (e.removeArtifact()) {
+                                                ops = ops.then(removeOneItemByName(state.getId(), "артефакт").onErrorResume(__ -> Mono.empty()));
+                                            }
+                                            if (e.grantSwordIfMissing()) {
+                                                ops = ops.then(grantItemIfAbsent(state.getId(), "меч", "Острый меч для боя"));
+                                            }
+
+                                            System.out.println("DEBUG updatePlot: applying event for stateId=" + state.getId()
+                                                    + " -> health=" + newHealth
+                                                    + ", newLoc=" + state.getCurrentLocation()
+                                                    + ", msg=" + state.getPlotProgress());
+
+                                            return ops.then(gameStateRepository.save(state));
+                                        })
+                                        .doOnError(err -> System.out.println("DEBUG updatePlot ERROR: " + err));
+                            });
                 })
                 .log("GameService.updatePlot"); // реакт-трейс в логи
     }
-
-
-
 
     private Event decide(String loc, String choiceKey, boolean hasSword, boolean hasArtifact, boolean hasLightBlade) {
         return switch (loc) {
@@ -354,17 +360,19 @@ public class GameService {
         });
     }
 
-    public Mono<List<CraftRecipe>> getAvailableCrafts(Long gameStateId) {
+    /** Доступные рецепты крафта: теперь Flux. */
+    public Flux<CraftRecipe> getAvailableCrafts(Long gameStateId) {
         if (gameStateId == null) {
-            return Mono.just(List.of()); // 🔒 защита от null id
+            return Flux.empty();
         }
 
         return listInventoryNames(gameStateId) // уже lower-case
-                .defaultIfEmpty(List.of())    // если в инвентаре пусто
-                .map(itemsLower -> {
+                .collectList()
+                .defaultIfEmpty(List.of())
+                .flatMapMany(itemsLower -> {
                     List<CraftRecipe> res = new ArrayList<>();
                     for (CraftRecipe r : RECIPES.values()) {
-                        if (r == null) continue; // 🔒 защита от null-рецепта
+                        if (r == null) continue;
 
                         String resultLower = r.result() == null || r.result().name() == null
                                 ? ""
@@ -380,9 +388,9 @@ public class GameService {
 
                         if (ok) res.add(r);
                     }
-                    return res;
+                    return Flux.fromIterable(res);
                 })
-                .onErrorReturn(List.of()); // 🔒 если где-то ошибка → пустой список
+                .onErrorResume(e -> Flux.empty());
     }
 
     public Mono<GameState> craft(Long gameStateId, String recipeKey) {
@@ -390,7 +398,7 @@ public class GameService {
         if (recipe == null) return findState(gameStateId);
 
         return findState(gameStateId).flatMap(state ->
-                listInventoryNames(state.getId()).flatMap(itemsLower -> {
+                listInventoryNames(state.getId()).collectList().flatMap(itemsLower -> {
                     String resultLower = recipe.result().name() == null ? "" : recipe.result().name().toLowerCase(Locale.ROOT);
 
                     if (itemsLower.contains(resultLower)) {
@@ -422,10 +430,6 @@ public class GameService {
                 })
         );
     }
-
-
-
-
 
     public Mono<GameState> useItem(Long gameStateId, Long itemId) {
         Mono<GameState> stateMono = findState(gameStateId);
@@ -473,7 +477,6 @@ public class GameService {
             }
         });
     }
-
 
     private String normalizeChoice(String raw) {
         if (raw == null) return "";

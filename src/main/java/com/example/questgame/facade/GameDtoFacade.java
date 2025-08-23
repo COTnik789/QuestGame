@@ -10,7 +10,6 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 @Component
 public class GameDtoFacade {
@@ -32,13 +31,11 @@ public class GameDtoFacade {
         final String progress = gs.getPlotProgress() == null ? "" : gs.getPlotProgress();
         final String location = gs.getCurrentLocation() == null ? "Неизвестно" : gs.getCurrentLocation();
 
-        final List<ActionDto> actions =
-                terminal ? List.of()
-                        : gameService.getAvailableActionKeys(gs) != null
-                        ? gameService.getAvailableActionKeys(gs).stream()
+        final Mono<List<ActionDto>> actionsMono =
+                terminal ? Mono.just(List.of())
+                        : gameService.getAvailableActionKeys(gs)
                         .map(k -> new ActionDto(k, gameService.labelOf(k)))
-                        .toList()
-                        : List.of();
+                        .collectList();
 
         final RiddleDto riddle =
                 (!terminal && gameService.riddlePromptActive(gs))
@@ -48,42 +45,39 @@ public class GameDtoFacade {
                 )
                         : null;
 
-        return gameService.getAvailableCrafts(gs.getId())
-                .onErrorReturn(List.of())     // если сервис упадёт → пустой список
-                .defaultIfEmpty(List.of())    // если Mono вернёт пусто
-                .map(recipes -> new GameStateDto(
-                        gs.getId(),
-                        progress,
-                        gs.getHealth(),
-                        location,
-                        actions,
-                        terminal,
-                        riddle,
-                        recipes.stream()
-                                .filter(Objects::nonNull)
-                                .map(r -> {
-                                    var result = r.result();
-                                    return new CraftDto(
-                                            r.key(),
-                                            r.title(),
-                                            r.requires(),
-                                            result == null
-                                                    ? new ItemDto("", "")
-                                                    : new ItemDto(
-                                                    result.name(),
-                                                    result.description()
-                                            )
-                                    );
-                                })
-                                .toList()
-                ));
+        return actionsMono.flatMap(actionsVal ->
+                gameService.getAvailableCrafts(gs.getId())
+                        .collectList()
+                        .onErrorReturn(List.of())
+                        .defaultIfEmpty(List.of())
+                        .map(recipes -> new GameStateDto(
+                                gs.getId(),
+                                progress,
+                                gs.getHealth(),
+                                location,
+                                actionsVal,
+                                terminal,
+                                riddle,
+                                recipes.stream()
+                                        .filter(Objects::nonNull)
+                                        .map(r -> {
+                                            var result = r.result();
+                                            return new CraftDto(
+                                                    r.key(),
+                                                    r.title(),
+                                                    r.requires(),
+                                                    result == null
+                                                            ? new ItemDto("", "")
+                                                            : new ItemDto(
+                                                            result.name(),
+                                                            result.description()
+                                                    )
+                                            );
+                                        })
+                                        .toList()
+                        ))
+        );
     }
-
-
-
-
-
-
 
     /** Удобный хелпер для случаев, когда у нас Mono<GameState>. */
     public Mono<GameStateDto> from(Mono<GameState> gsMono) {
@@ -92,9 +86,8 @@ public class GameDtoFacade {
                 .flatMap(this::from);
     }
 
-
     /** Построить DTO по id состояния. */
     public Mono<GameStateDto> byId(Long gameStateId) {
-        return gameService.findState(gameStateId).flatMap(this::from);
+        return gameService.byId(gameStateId).flatMap(this::from);
     }
 }

@@ -4,6 +4,7 @@ import com.example.questgame.model.User;
 import com.example.questgame.security.JwtCookieUtil;
 import com.example.questgame.security.JwtService;
 import com.example.questgame.service.UserService;
+import com.example.questgame.config.SchedulerProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
@@ -19,6 +20,7 @@ import reactor.core.publisher.Mono;
  * Контроллер аутентификации/регистрации.
  * Теперь использует JwtCookieUtil для установки/очистки cookie.
  */
+// Все контроллеры должны возвращать Flax and Mono
 @Controller
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -28,11 +30,13 @@ public class AuthController {
     private final UserService userService;
     private final JwtService jwtService;
     private final JwtCookieUtil jwtCookieUtil;
+    private final SchedulerProvider schedulerProvider;
 
-    public AuthController(UserService userService, JwtService jwtService, JwtCookieUtil jwtCookieUtil) {
+    public AuthController(UserService userService, JwtService jwtService, JwtCookieUtil jwtCookieUtil, SchedulerProvider schedulerProvider) {
         this.userService = userService;
         this.jwtService = jwtService;
         this.jwtCookieUtil = jwtCookieUtil;
+        this.schedulerProvider = schedulerProvider;
     }
 
     @GetMapping("/login")
@@ -57,6 +61,7 @@ public class AuthController {
         }
         return userService.createUser(form.email, form.password)
                 .flatMap(u -> issueAuthAndRedirect(exchange, u.getEmail()))
+                .subscribeOn(schedulerProvider.cpu())
                 .onErrorResume(ex -> {
                     log.warn("Регистрация не удалась: {}", ex.getMessage());
                     model.addAttribute("error", "Не удалось создать пользователя: " + ex.getMessage());
@@ -87,7 +92,8 @@ public class AuthController {
                         return Mono.just("login");
                     }
                     return issueAuthAndRedirect(exchange, u.getEmail());
-                });
+                })
+                .subscribeOn(schedulerProvider.cpu());
     }
 
     @PostMapping("/logout")

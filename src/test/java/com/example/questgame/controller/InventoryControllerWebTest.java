@@ -18,9 +18,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -49,9 +48,11 @@ class InventoryControllerWebTest {
                     return chain.filter(exchange);
                 });
 
-        // 🔑 общий стаб
         Mockito.when(gameService.getAvailableCrafts(Mockito.anyLong()))
-                .thenReturn(Mono.just(List.of()));
+                .thenReturn(Flux.empty());
+
+        Mockito.when(gameService.getAvailableActionKeys(Mockito.any(GameState.class)))
+                .thenReturn(Flux.empty());
     }
 
     @Test

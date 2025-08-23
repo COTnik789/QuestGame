@@ -40,7 +40,7 @@
 ## Архитектура
 
 - **controller**: `AuthController`, `GameController`, `InventoryController`, `GameFrontendController`, `RoutingController`
-- **service**: `UserService`, `GameService`
+- **service**: `UserService`, `com.example.questgame.service.`
 - **repository**: R2DBC репозитории для `User`, `GameState`, `InventoryItem`
 - **security**: `SecurityConfig`, `JwtWebFilter`, `JwtService`, `JwtCookieUtil`
 - **dto/facade**: `*Dto`, `GameDtoFacade`

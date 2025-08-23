@@ -21,10 +21,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Hooks;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -52,15 +51,14 @@ class GameControllerWebTest {
     @BeforeEach
     void bypassSecurityFilter() {
         Mockito.when(jwtWebFilter.filter(Mockito.any(ServerWebExchange.class), Mockito.any(WebFilterChain.class)))
-                .thenAnswer(inv -> {
-                    ServerWebExchange exchange = inv.getArgument(0);
-                    WebFilterChain chain = inv.getArgument(1);
-                    return chain.filter(exchange);
-                });
+                .thenAnswer(inv -> inv.<WebFilterChain>getArgument(1).filter(inv.getArgument(0)));
 
-        // 🔑 ключевой стаб
+        // важные стабы для фасада:
         Mockito.when(gameService.getAvailableCrafts(Mockito.anyLong()))
-                .thenReturn(Mono.just(List.of()));
+                .thenReturn(Flux.empty()); // теперь Flux, не Mono<List>
+
+        Mockito.when(gameService.getAvailableActionKeys(Mockito.any(GameState.class)))
+                .thenReturn(Flux.empty()); // иначе будет NPE внутри фасада
     }
 
     @Test

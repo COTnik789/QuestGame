@@ -1,3 +1,19 @@
 package com.example.questgame.dto;
 
-public record ItemDto(String name, String description) {}
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ItemDto {
+    @JsonProperty("name")
+    private String name;
+
+    @JsonProperty("description")
+    private String description;
+}
