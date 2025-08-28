@@ -102,7 +102,7 @@ class GameServiceTest {
         given(inventoryItemRepository.save(any())).willAnswer(i -> Mono.just(i.getArgument(0)));
 
         StepVerifier.create(service.craft(1L, "light_blade"))
-                .assertNext(saved -> assertThat(saved.getPlotProgress()).contains("Вы скрафтили: клинок света"))
+                .assertNext(saved -> assertThat(saved.getPlotProgress()).contains("Вы создали: клинок света"))
                 .verifyComplete();
 
         verify(inventoryItemRepository).deleteById(11L);
